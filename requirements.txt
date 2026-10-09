@@ -1,0 +1,6 @@
+   simglucose
+   numpy
+   pandas
+   matplotlib
+   scipy
+   jupyter
