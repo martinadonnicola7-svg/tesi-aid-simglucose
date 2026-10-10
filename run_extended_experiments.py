@@ -1,3 +1,13 @@
+"""
+run_extended_experiments.py
+Campagna estesa di simulazione multipaziente e multicarico per sistemi AID.
+Configurazione:
+  - Pazienti: adult#001, adult#002, adult#003
+  - Carichi: 30g, 60g, 90g (non annunciati, ore 12:00)
+  - Durata: 16 ore esatte (320 passi con dt = 3 min)
+  - Output: metriche_estese.csv, grafico_multipaziente.png, grafico_sensibilita_pasti.png
+"""
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,230 +20,240 @@ from simglucose.patient.t1dpatient import T1DPatient
 from simglucose.simulation.scenario import CustomScenario
 from simglucose.controller.base import Controller, Action
 
-# ----------------------------------------------------------------------
-# 1. CONTROLLORE PID STANDARD
-# ----------------------------------------------------------------------
+
 class StandardPIDController(Controller):
-    def __init__(self, target=115, kp=0.0006, ki=0.00001, kd=0.004, basal_rate=0.025):
+    def __init__(self, target=110.0, kp=0.0006, ki=0.000015, kd=0.004, basal_rate=0.021, dt=3.0):
         self.target = target
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.basal_rate = basal_rate
+        self.dt = dt
         self.integral_error = 0.0
         self.prev_cgm = None
 
     def policy(self, observation, reward, done, **info):
         cgm = observation.CGM
         error = cgm - self.target
-        d_error = 0.0 if self.prev_cgm is None else (self.prev_cgm - cgm)
+        self.integral_error += error * self.dt
+        self.integral_error = float(np.clip(self.integral_error, -3000.0, 10000.0))
+        
+        d_cgm_dt = 0.0 if self.prev_cgm is None else (cgm - self.prev_cgm) / self.dt
         self.prev_cgm = cgm
-        self.integral_error = np.clip(self.integral_error + error, -5000, 15000)
-        correction = (self.kp * error) + (self.ki * self.integral_error) + (self.kd * d_error)
-        u = max(0.0, self.basal_rate + correction)
+        
+        correction = (self.kp * error) + (self.ki * self.integral_error) + (self.kd * d_cgm_dt)
+        u = max(0.0, min(self.basal_rate + correction, 0.25))
         return Action(basal=u, bolus=0.0)
 
     def reset(self):
         self.integral_error = 0.0
         self.prev_cgm = None
 
-# ----------------------------------------------------------------------
-# 2. CONTROLLORE PROPOSTO VINCOLATO ALL'IOB
-# ----------------------------------------------------------------------
+
 class IOBConstrainedController(Controller):
-    def __init__(self, target=115, kp=0.0007, ki=0.000015, kd=0.005, 
-                 basal_rate=0.025, tau_s=50.0, iob_max_factor=3.5):
+    def __init__(self, target=110.0, kp=0.0006, ki=0.000015, kd=0.004, basal_rate=0.021,
+                 tau_s=50.0, iob_cap=2.2, plgs_threshold=90.0, dt=3.0):
         self.target = target
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.basal_rate = basal_rate
-        self.tau_s = tau_s                  
-        self.iob_max_factor = iob_max_factor 
-        self.s1 = 0.0
-        self.s2 = 0.0
+        self.tau_s = tau_s
+        self.iob_cap = iob_cap
+        self.plgs_threshold = plgs_threshold
+        self.dt = dt
+        
         self.integral_error = 0.0
         self.prev_cgm = None
+        self.s1 = 0.0
+        self.s2 = 0.0
+        self.current_iob = 0.0
 
     def policy(self, observation, reward, done, **info):
         cgm = observation.CGM
         error = cgm - self.target
-        d_cgm = 0.0 if self.prev_cgm is None else (cgm - self.prev_cgm)
-        self.prev_cgm = cgm
         
-        # Integrator Clamping subordinato alla derivata
-        if d_cgm < 0 and error > 0:
-            pass
+        self.current_iob = (self.s1 + self.s2) / 60.0
+        d_cgm_dt = 0.0 if self.prev_cgm is None else (cgm - self.prev_cgm) / self.dt
+        cgm_projected = cgm + (d_cgm_dt * 20.0)
+        
+        if cgm > self.target:
+            self.integral_error += error * self.dt
         else:
-            self.integral_error = np.clip(self.integral_error + error, -2000, 8000)
-            
-        correction = (self.kp * error) + (self.ki * self.integral_error) - (self.kd * d_cgm)
-        desired_u = max(0.0, self.basal_rate + correction)
+            self.integral_error = max(0.0, self.integral_error - (abs(error) * self.dt * 0.5))
+        self.integral_error = float(np.clip(self.integral_error, -1000.0, 6000.0))
         
-        # Saturazione dinamica basata su osservatore IOB
-        iob_current = self.s1 + self.s2
-        iob_upper_bound = self.basal_rate * 60.0 * self.iob_max_factor
+        correction = (self.kp * error) + (self.ki * self.integral_error) + (self.kd * d_cgm_dt)
+        u = self.basal_rate + correction
         
-        if iob_current > iob_upper_bound:
-            actual_u = min(desired_u, self.basal_rate * 0.5)
-        else:
-            actual_u = desired_u
+        if self.current_iob > self.iob_cap and u > self.basal_rate:
+            u = self.basal_rate
             
-        u_active = max(0.0, actual_u - self.basal_rate)
-        ds1 = u_active - (self.s1 / self.tau_s)
-        ds2 = (self.s1 / self.tau_s) - (self.s2 / self.tau_s)
+        if cgm_projected < self.plgs_threshold or cgm < 75.0:
+            u = 0.0
+            
+        u = max(0.0, min(u, 0.25))
+        
+        u_excess = max(0.0, u - self.basal_rate)
+        ds1 = (u_excess - (self.s1 / self.tau_s)) * self.dt
+        ds2 = ((self.s1 / self.tau_s) - (self.s2 / self.tau_s)) * self.dt
         self.s1 += ds1
         self.s2 += ds2
-
-        # Arresto predittivo preventivo PLGS
-        cgm_projected = cgm + (d_cgm * 20.0)
-        if cgm_projected < 75 or cgm < 80:
-            actual_u = 0.0
-
-        return Action(basal=actual_u, bolus=0.0)
+        self.prev_cgm = cgm
+        
+        return Action(basal=u, bolus=0.0)
 
     def reset(self):
-        self.s1 = 0.0
-        self.s2 = 0.0
         self.integral_error = 0.0
         self.prev_cgm = None
+        self.s1 = 0.0
+        self.s2 = 0.0
+        self.current_iob = 0.0
 
-# ----------------------------------------------------------------------
-# 3. FUNZIONE DI SIMULAZIONE GENERICA
-# ----------------------------------------------------------------------
-def simulate_single(patient_name, controller_type, cho_grams):
-    start_time = datetime(2026, 10, 4, 8, 0, 0)
-    scenario_tuples = [(timedelta(hours=4), cho_grams)]
-    scenario = CustomScenario(start_time=start_time, scenario=scenario_tuples)
 
+def simulate(controller_class, patient_name, meal_cho, sim_hours=16.0):
+    start_time = datetime(2026, 1, 1, 8, 0, 0)
+    meal_scenario = [(12.0, meal_cho)]
+    
     patient = T1DPatient.withName(patient_name)
-    sensor = CGMSensor.withName("Dexcom", seed=10)
-    pump = InsulinPump.withName("Insulet")
+    sensor = CGMSensor.withName('Dexcom', seed=1)
+    pump = InsulinPump.withName('Insulet')
+    scenario = CustomScenario(start_time=start_time, scenario=meal_scenario)
     env = T1DSimEnv(patient, sensor, pump, scenario)
-
-    try:
-        u2ss = patient._params["u2ss"]
-        bw = patient._params["BW"]
-        basal_nom = (u2ss * bw) / 6000.0
-    except Exception:
-        basal_nom = 0.025
-
-    if controller_type == "PID":
-        ctrl = StandardPIDController(basal_rate=basal_nom)
-    else:
-        ctrl = IOBConstrainedController(basal_rate=basal_nom)
-
+    
+    dt = env.sample_time
+    total_steps = int(sim_hours * 60 / dt)
+    
+    bw = patient._params['BW']
+    u2ss = patient._params['u2ss']
+    basal_nominal = (u2ss * bw) / 6000.0
+    
+    controller = controller_class(basal_rate=basal_nominal, dt=dt)
+    
+    time_log, cgm_log, ins_log, iob_log = [], [], [], []
     obs, reward, done, info = env.reset()
-    ctrl.reset()
-
-    history = {"time": [], "BG": [], "insulin": []}
-    for step in range(16 * 60):
-        t = start_time + timedelta(minutes=step)
-        action = ctrl.policy(obs, reward, done, **info)
+    controller.reset()
+    
+    for step in range(total_steps):
+        current_t = start_time + timedelta(minutes=step * dt)
+        action = controller.policy(obs, reward, done, **info)
+        
+        time_log.append(current_t)
+        cgm_log.append(obs.CGM)
+        ins_log.append(action.basal * 60.0)
+        iob_log.append(getattr(controller, 'current_iob', 0.0))
+        
         obs, reward, done, info = env.step(action)
-        history["time"].append(t)
-        history["BG"].append(env.patient.observation.Gsub)
-        history["insulin"].append(action.basal)
+        if done:
+            break
+            
+    return pd.DataFrame({
+        'Time': time_log,
+        'CGM': cgm_log,
+        'Insulin_Uh': ins_log,
+        'IOB': iob_log
+    })
 
-    df = pd.DataFrame(history)
-    bg = df["BG"]
-    metrics = {
-        "Paziente": patient_name,
-        "Controllore": controller_type,
-        "CHO [g]": cho_grams,
-        "TIR [%]": (np.sum((bg >= 70) & (bg <= 180)) / len(bg)) * 100,
-        "TAR [%]": (np.sum(bg > 180) / len(bg)) * 100,
-        "TBR [%]": (np.sum(bg < 70) / len(bg)) * 100,
-        "Picco [mg/dL]": bg.max(),
-        "Nadir [mg/dL]": bg.min()
+
+def calc_metrics(df, patient, ctrl_name, cho):
+    cgm = df['CGM'].values
+    n = len(cgm)
+    
+    tir = np.sum((cgm >= 70.0) & (cgm <= 180.0)) / n * 100.0
+    tar = np.sum(cgm > 180.0) / n * 100.0
+    tbr = np.sum(cgm < 70.0) / n * 100.0
+    
+    mask_late = (df['Time'] >= datetime(2026, 1, 1, 15, 0, 0)) & (df['Time'] <= datetime(2026, 1, 1, 18, 0, 0))
+    cgm_late = df.loc[mask_late, 'CGM'].values
+    tbr_late = np.sum(cgm_late < 70.0) / len(cgm_late) * 100.0 if len(cgm_late) > 0 else 0.0
+    
+    return {
+        'Paziente': patient,
+        'Controllore': ctrl_name,
+        'CHO [g]': int(cho),
+        'TIR [%]': round(tir, 2),
+        'TAR [%]': round(tar, 2),
+        'TBR [%]': round(tbr, 2),
+        'TBR_Tardivo (3-6h) [%]': round(tbr_late, 2),
+        'Picco [mg/dL]': round(float(np.max(cgm)), 1),
+        'Nadir [mg/dL]': round(float(np.min(cgm)), 1)
     }
-    return df, metrics
 
-# ----------------------------------------------------------------------
-# 4. CAMPAGNA 1: ANALISI DI SENSIBILITA' AL CARICO (30, 60, 90 g)
-# ----------------------------------------------------------------------
-print("=== AVVIO CAMPAGNA 1: STUDIO DI SENSIBILITA' AL CARICO (adult#001) ===")
-meals = [30, 60, 90]
-results_list = []
-curves_sens = {}
 
-for m in meals:
-    print(f"-> Esecuzione pasto {m}g CHO...")
-    df_pid, met_pid = simulate_single("adult#001", "PID", m)
-    df_iob, met_iob = simulate_single("adult#001", "IOB", m)
-    results_list.extend([met_pid, met_iob])
-    curves_sens[f"PID_{m}"] = df_pid
-    curves_sens[f"IOB_{m}"] = df_iob
+def main():
+    print("Avvio campagna estesa multipaziente e multicarico...")
+    records = []
+    
+    # 1. Analisi di Sensibilità al Carico su adult#001 (30g, 60g, 90g)
+    cho_list = [30.0, 60.0, 90.0]
+    cho_dfs = {}
+    for cho in cho_list:
+        print(f"  -> adult#001 con pasto {int(cho)}g...")
+        df_p = simulate(StandardPIDController, 'adult#001', cho)
+        df_i = simulate(IOBConstrainedController, 'adult#001', cho)
+        records.append(calc_metrics(df_p, 'adult#001', 'PID', cho))
+        records.append(calc_metrics(df_i, 'adult#001', 'IOB', cho))
+        cho_dfs[cho] = (df_p, df_i)
+        
+    # 2. Analisi Multipaziente a carico nominale (60g) su adult#002 e adult#003
+    multi_dfs = {'adult#001': cho_dfs[60.0]}
+    for pat in ['adult#002', 'adult#003']:
+        print(f"  -> {pat} con pasto 60g...")
+        df_p = simulate(StandardPIDController, pat, 60.0)
+        df_i = simulate(IOBConstrainedController, pat, 60.0)
+        records.append(calc_metrics(df_p, pat, 'PID', 60.0))
+        records.append(calc_metrics(df_i, pat, 'IOB', 60.0))
+        multi_dfs[pat] = (df_p, df_i)
+        
+    # Salvataggio dataset metriche_estese.csv
+    df_metrics = pd.DataFrame(records)
+    df_metrics.to_csv('metriche_estese.csv', index=False)
+    print("\nDataset completato e salvato in metriche_estese.csv:")
+    print(df_metrics[['Paziente', 'Controllore', 'CHO [g]', 'TIR [%]', 'TAR [%]', 'TBR [%]', 'TBR_Tardivo (3-6h) [%]', 'Picco [mg/dL]', 'Nadir [mg/dL]']])
+    
+    # Generazione grafico_sensibilita_pasti.png
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    t_h = [(t - cho_dfs[60.0][0]['Time'].iloc[0]).total_seconds() / 3600.0 for t in cho_dfs[60.0][0]['Time']]
+    for idx, cho in enumerate(cho_list):
+        ax = axes[idx]
+        ax.axhspan(70, 180, color='green', alpha=0.15)
+        ax.axvline(4.0, color='black', linestyle=':')
+        ax.plot(t_h, cho_dfs[cho][0]['CGM'], 'r--', label='PID')
+        ax.plot(t_h, cho_dfs[cho][1]['CGM'], 'b-', label='PID + Vincolo IOB')
+        ax.set_ylabel(f'CGM ({int(cho)}g) [mg/dL]')
+        ax.grid(True, linestyle=':', alpha=0.6)
+        if idx == 0:
+            ax.set_title('Sensibilità ai Carichi di Carboidrati (adult#001)')
+            ax.legend(loc='upper right')
+    axes[2].set_xlabel('Tempo [ore]')
+    axes[2].set_xlim([0, 16])
+    plt.tight_layout()
+    plt.savefig('grafico_sensibilita_pasti.png', dpi=300)
+    plt.close()
+    
+    # Generazione grafico_multipaziente.png
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    for idx, pat in enumerate(['adult#001', 'adult#002', 'adult#003']):
+        ax = axes[idx]
+        ax.axhspan(70, 180, color='green', alpha=0.15)
+        ax.axvline(4.0, color='black', linestyle=':')
+        ax.plot(t_h, multi_dfs[pat][0]['CGM'], 'r--', label='PID')
+        ax.plot(t_h, multi_dfs[pat][1]['CGM'], 'b-', label='PID + Vincolo IOB')
+        ax.set_ylabel(f'CGM ({pat}) [mg/dL]')
+        ax.grid(True, linestyle=':', alpha=0.6)
+        if idx == 0:
+            ax.set_title('Confronto Multipaziente su Disturbo Prandiale Nominale (60g)')
+            ax.legend(loc='upper right')
+    axes[2].set_xlabel('Tempo [ore]')
+    axes[2].set_xlim([0, 16])
+    plt.tight_layout()
+    plt.savefig('grafico_multipaziente.png', dpi=300)
+    plt.close()
+    
+    print("\nGrafici esportati con successo in:")
+    print("  - grafico_sensibilita_pasti.png")
+    print("  - grafico_multipaziente.png")
 
-# ----------------------------------------------------------------------
-# 5. CAMPAGNA 2: ROBUSTEZZA MULTI-PAZIENTE (adult#001, adult#002, adult#003)
-# ----------------------------------------------------------------------
-print("\n=== AVVIO CAMPAGNA 2: VALIDAZIONE SU POPOLAZIONE VIRTUALE ===")
-patients = ["adult#001", "adult#002", "adult#003"]
-curves_pat = {}
 
-for p in patients:
-    print(f"-> Esecuzione su {p} (pasto 60g CHO)...")
-    df_p_pid, met_p_pid = simulate_single(p, "PID", 60)
-    df_p_iob, met_p_iob = simulate_single(p, "IOB", 60)
-    if p != "adult#001": # adult#001 a 60g e' gia' in lista
-        results_list.extend([met_p_pid, met_p_iob])
-    curves_pat[f"PID_{p}"] = df_p_pid
-    curves_pat[f"IOB_{p}"] = df_p_iob
-
-# Salva tabella riassuntiva
-df_results = pd.DataFrame(results_list)
-print("\n=================== TABELLA METRICHE CLINICHE ===================")
-print(df_results.round(2).to_string(index=False))
-df_results.to_csv("metriche_estese.csv", index=False)
-print("Salvato: metriche_estese.csv")
-
-# ----------------------------------------------------------------------
-# 6. GENERAZIONE DEI GRAFICI COMPARATIVI PER LA TESI
-# ----------------------------------------------------------------------
-# Grafico 1: Sensibilita' al pasto
-fig, axes = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
-colors = {"PID": "#d62728", "IOB": "#1f77b4"}
-
-for idx, m in enumerate(meals):
-    ax = axes[idx]
-    ax.plot(curves_sens[f"PID_{m}"]["time"], curves_sens[f"PID_{m}"]["BG"], 
-            label="PID Standard", color=colors["PID"], linestyle="--", lw=2)
-    ax.plot(curves_sens[f"IOB_{m}"]["time"], curves_sens[f"IOB_{m}"]["BG"], 
-            label="IOB Proposto", color=colors["IOB"], lw=2.2)
-    ax.axhspan(70, 180, color="green", alpha=0.12)
-    ax.axhline(180, color="darkorange", ls=":", alpha=0.7)
-    ax.axhline(70, color="red", ls=":", alpha=0.7)
-    ax.set_ylabel("Glicemia [mg/dL]")
-    ax.set_title(f"Carico Prandiale non Annunciato: {m}g CHO (adult#001)", fontweight="bold", fontsize=10)
-    ax.grid(True, ls=":", alpha=0.6)
-    if idx == 0:
-        ax.legend(loc="upper right")
-
-axes[-1].set_xlabel("Orario")
-plt.tight_layout()
-plt.savefig("grafico_sensibilita_pasti.png", dpi=300)
-print("Salvato grafico: grafico_sensibilita_pasti.png")
-
-# Grafico 2: Robustezza Multi-paziente
-fig2, axes2 = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
-for idx, p in enumerate(patients):
-    ax = axes2[idx]
-    ax.plot(curves_pat[f"PID_{p}"]["time"], curves_pat[f"PID_{p}"]["BG"], 
-            label="PID Standard", color=colors["PID"], linestyle="--", lw=2)
-    ax.plot(curves_pat[f"IOB_{p}"]["time"], curves_pat[f"IOB_{p}"]["BG"], 
-            label="IOB Proposto", color=colors["IOB"], lw=2.2)
-    ax.axhspan(70, 180, color="green", alpha=0.12)
-    ax.axhline(180, color="darkorange", ls=":", alpha=0.7)
-    ax.axhline(70, color="red", ls=":", alpha=0.7)
-    ax.set_ylabel("Glicemia [mg/dL]")
-    ax.set_title(f"Risposta Glicemica su Soggetto Virtuale: {p} (60g CHO)", fontweight="bold", fontsize=10)
-    ax.grid(True, ls=":", alpha=0.6)
-    if idx == 0:
-        ax.legend(loc="upper right")
-
-axes2[-1].set_xlabel("Orario")
-plt.tight_layout()
-plt.savefig("grafico_multipaziente.png", dpi=300)
-print("Salvato grafico: grafico_multipaziente.png")
-print("\n--> Campagna sperimentale completata con successo!")
+if __name__ == '__main__':
+    main()
