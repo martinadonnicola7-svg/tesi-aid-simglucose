@@ -1,4 +1,0 @@
-Paziente,Controllore,CHO [g],TIR [%],TAR [%],TBR [%],TBR_Tardivo (3-6h) [%],Picco [mg/dL],Nadir [mg/dL]
-adult#001,PID,30,65.62,0.94,33.44,100.0,183.1,39.0
-adult#001,PID,60,54.69,11.88,33.44,100.0,214.3,39.0
-adult#001,PID,90,50.94,15.62,33.44,100.0,235.7,39.0
