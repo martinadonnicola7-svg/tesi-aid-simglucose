@@ -1,7 +1,7 @@
 # Controllo AID con pasti non annunciati (simulazioni in silico)
 
-Codice della tesi triennale *Controllo di un sistema AID con disturbi prandiali non annunciati*
-(Politecnico di Bari, Fondamenti di Automatica). Le simulazioni usano
+Codice tesi triennale in *Fondamenti di Automatica-Controllo di un sistema AID con disturbi prandiali non annunciati*.
+Le simulazioni usano
 [`simglucose`](https://github.com/jxx123/simglucose), un'implementazione Python del simulatore UVa/Padova.
 
 ## Scenario
