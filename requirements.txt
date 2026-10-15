@@ -1,24 +1,9 @@
-# ==============================================================================
-# Piattaforma di Simulazione Metabolica (UVA/Padova in silico model)
-# ==============================================================================
+# Dipendenze minime. I risultati salvati in results/ sono stati ottenuti con:
+# Python 3.12, simglucose 0.2.11, numpy 2.4, scipy 1.17, pandas 3.0, matplotlib 3.10.
+# Con versioni diverse (per esempio simglucose 0.2.1) rilancia run_campaign.py e usa i numeri del TUO computer.
 simglucose>=0.2.1
-
-# ==============================================================================
-# Calcolo Scientifico e Manipolazione Dati
-# ==============================================================================
 numpy
 scipy
 pandas
-
-# ==============================================================================
-# Visualizzazione Grafica
-# ==============================================================================
 matplotlib
-
-# ==============================================================================
-# Ambiente Jupyter Notebook
-# ==============================================================================
 jupyter
-notebook
-nbconvert
-ipykernel
