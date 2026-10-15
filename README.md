@@ -94,7 +94,3 @@ LICENSE
 
 Risultati *in silico*, con un solo pasto per simulazione e tre pazienti virtuali. I guadagni sono scelti a mano e non ottimizzati.
 Il tetto IOB agisce come un interruttore: l'infusione alterna tra valore basale e valore alto, quindi l'attuatore commuta.
-cd tesi-aid-simglucose
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
