@@ -115,74 +115,108 @@ if __name__ == "__main__":
     print("\n", P.to_string(index=False))
 
     # --- 4. grafici ----------------------------------------------------------------------------
-    def band(ax, meal_h=A.MEAL_CLOCK_H, banda=True):
-        """Linea del pasto e griglia; banda 70-180 mg/dL solo sui pannelli di glicemia."""
-        if banda:
-            ax.axhspan(70, 180, color="green", alpha=0.12)
-        ax.axvline(meal_h, color="k", ls=":", lw=1.2)
-        ax.grid(ls=":", alpha=0.5)
+    # Per ogni scenario si riportano glicemia, insulina somministrata e IOB (tre pannelli in colonna).
 
     def finestra(df):
+        """Solo la finestra di analisi: l'assestamento non entra nei grafici."""
         return df[df.t_h >= A.WARMUP_H]
 
-    # 4.1 tre pannelli - adult#001, 60 g
-    pz = A.make_patient("adult#001")
-    iob_cap = 1.5 * A.basal_rate(pz) * 60.0
+    def decora(ax, meal_h=A.MEAL_CLOCK_H, banda=False):
+        if banda:
+            ax.axhspan(70, 180, color="green", alpha=0.12)
+        for h in (meal_h if isinstance(meal_h, (list, tuple)) else [meal_h]):
+            if h is not None:
+                ax.axvline(h, color="k", ls=":", lw=1.2)
+        ax.grid(ls=":", alpha=0.5)
+        ax.set_xlim(A.WARMUP_H, A.ANALYSIS_END_H)
+
+    def colonna(axc, voci, ub, meal_h=A.MEAL_CLOCK_H, legenda=False, tetto=True):
+        """Riempie una colonna di tre assi con glicemia, infusione e IOB.
+
+        voci: lista di (etichetta, DataFrame, colore). Se colore è None si usa il ciclo di default.
+        """
+        for etichetta, df, colore in voci:
+            d = finestra(df)
+            kw = {} if colore is None else {"color": colore}
+            axc[0].plot(d.t_h, d.BG, label=etichetta, **kw)
+            axc[1].plot(d.t_h, d.Insulin_Uh, drawstyle="steps-post", **kw)
+            axc[2].plot(d.t_h, d.IOB, **kw)
+        axc[1].axhline(ub * 60, color="gray", ls=":", lw=1)
+        if tetto:
+            axc[2].axhline(1.5 * ub * 60, color="gray", ls="-.", lw=1)
+        decora(axc[0], meal_h, banda=True)
+        decora(axc[1], meal_h)
+        decora(axc[2], meal_h)
+        if legenda:
+            axc[0].legend(fontsize=7)
+
+    def etichette(ax):
+        ax[0, 0].set_ylabel("BG plasmatica [mg/dL]")
+        ax[1, 0].set_ylabel("Infusione [U/h]")
+        ax[2, 0].set_ylabel("IOB stimato [U]")
+        for a in ax[2]:
+            a.set_xlabel("Ora del giorno [h]")
+
+    ub1 = A.basal_rate(A.make_patient("adult#001"))
+
+    # 4.1 scenario di riferimento: adult#001, 60 g, PID e controllore proposto
     fig, ax = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
     for n in ["PID", "PID+IOB+PLGS"]:
-        df = finestra(cache[key("adult#001", 60, n)][0])
-        ax[0].plot(df.t_h, df.BG, color=COL[n], label=n)
-        ax[1].plot(df.t_h, df.Insulin_Uh, color=COL[n], drawstyle="steps-post")
-        ax[2].plot(df.t_h, df.IOB, color=COL[n], label=f"{n}: IOB stimato")
-        ax[2].plot(df.t_h, df.IOB_vero, color=COL[n], ls="--", lw=1, label=f"{n}: IOB netto del modello")
-    ax[1].axhline(A.basal_rate(pz) * 60, color="gray", ls=":", label="basale")
-    ax[2].axhline(iob_cap, color="gray", ls="-.", label="Tetto IOB (1.5 x basale oraria)")
-    band(ax[0]); band(ax[1], banda=False); band(ax[2], banda=False)
-    ax[1].legend(loc="upper right")
+        d = finestra(cache[key("adult#001", 60, n)][0])
+        ax[0].plot(d.t_h, d.BG, color=COL[n], label=n)
+        ax[1].plot(d.t_h, d.Insulin_Uh, color=COL[n], drawstyle="steps-post")
+        ax[2].plot(d.t_h, d.IOB, color=COL[n], label=f"{n}: IOB stimato")
+        ax[2].plot(d.t_h, d.IOB_vero, color=COL[n], ls="--", lw=1, label=f"{n}: IOB del modello")
+    ax[1].axhline(ub1 * 60, color="gray", ls=":", label="basale")
+    ax[2].axhline(1.5 * ub1 * 60, color="gray", ls="-.", label="tetto IOB")
+    decora(ax[0], banda=True); decora(ax[1]); decora(ax[2])
     ax[0].set_ylabel("Glicemia plasmatica [mg/dL]"); ax[0].legend()
     ax[0].set_title("adult#001, pasto non annunciato da 60 g alle 12:00 (linea punteggiata)")
-    ax[1].set_ylabel("Infusione [U/h]")
-    ax[2].set_ylabel("IOB netto [U]"); ax[2].set_xlabel("Ora del giorno [h]"); ax[2].legend(fontsize=8)
-    ax[2].set_xlim(A.WARMUP_H, A.ANALYSIS_END_H)
+    ax[1].set_ylabel("Infusione [U/h]"); ax[1].legend(loc="upper right", fontsize=8)
+    ax[2].set_ylabel("IOB netto [U]"); ax[2].set_xlabel("Ora del giorno [h]"); ax[2].legend(fontsize=8, ncol=2)
     plt.tight_layout(); plt.savefig("results/fig_3pannelli_adult001_60g.png", dpi=200); plt.close()
 
-    # 4.2 sensibilità al carico (adult#001)
-    fig, ax = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-    for i, c in enumerate([30, 60, 90]):
-        for n in CONFRONTO:
-            d = finestra(cache[key("adult#001", c, n)][0])
-            ax[i].plot(d.t_h, d.BG, color=COL[n], label=n)
-        band(ax[i]); ax[i].set_ylabel(f"BG [mg/dL] ({c} g)")
-    ax[0].legend(fontsize=8); ax[0].set_title("Sensibilità al carico di carboidrati (adult#001)")
-    ax[2].set_xlabel("Ora del giorno [h]"); ax[2].set_xlim(A.WARMUP_H, A.ANALYSIS_END_H)
+    # 4.2 sensibilità alla quantità di carboidrati (adult#001)
+    fig, ax = plt.subplots(3, 3, figsize=(15, 9), sharex=True)
+    for j, c in enumerate([30, 60, 90]):
+        voci = [(n, cache[key("adult#001", c, n)][0], COL[n]) for n in CONFRONTO]
+        colonna(ax[:, j], voci, ub1, legenda=(j == 0))
+        ax[0, j].set_title(f"Pasto da {c} g")
+    etichette(ax)
+    fig.suptitle("Sensibilità alla quantità di carboidrati (adult#001)")
     plt.tight_layout(); plt.savefig("results/fig_sensibilita_carico.png", dpi=200); plt.close()
 
     # 4.3 confronto tra pazienti (60 g)
-    fig, ax = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-    for i, p in enumerate(PAZIENTI):
-        for n in CONFRONTO:
-            d = finestra(cache[key(p, 60, n)][0])
-            ax[i].plot(d.t_h, d.BG, color=COL[n], label=n)
-        band(ax[i]); ax[i].set_ylabel(f"BG [mg/dL] ({p})")
-    ax[0].legend(fontsize=8); ax[0].set_title("Confronto tra pazienti virtuali, pasto non annunciato da 60 g")
-    ax[2].set_xlabel("Ora del giorno [h]"); ax[2].set_xlim(A.WARMUP_H, A.ANALYSIS_END_H)
+    fig, ax = plt.subplots(3, 3, figsize=(15, 9), sharex=True)
+    for j, p in enumerate(PAZIENTI):
+        ubp = A.basal_rate(A.make_patient(p))
+        voci = [(n, cache[key(p, 60, n)][0], COL[n]) for n in CONFRONTO]
+        colonna(ax[:, j], voci, ubp, legenda=(j == 0))
+        ax[0, j].set_title(p)
+    etichette(ax)
+    fig.suptitle("Confronto tra pazienti virtuali, pasto non annunciato da 60 g")
     plt.tight_layout(); plt.savefig("results/fig_multipaziente_60g.png", dpi=200); plt.close()
 
-    # 4.4 orario del pasto e velocità di assorbimento (adult#001, 60 g)
-    fig, ax = plt.subplots(2, 2, figsize=(13, 7), sharex=True, sharey=True)
+    # 4.4 sensibilità all'istante del pasto (adult#001, 60 g)
+    fig, ax = plt.subplots(3, 2, figsize=(12, 9), sharex=True)
     for j, n in enumerate(["PID", "PID+IOB+PLGS"]):
-        for h in [10, 12, 14, 16]:
-            d = finestra(cache[key("adult#001", 60, n, meal_h=h)][0])
-            ax[0, j].plot(d.t_h, d.BG, label=f"pasto alle {h}:00")
-        for s in [0.5, 1.0, 2.0]:
-            d = finestra(cache[key("adult#001", 60, n, assorb=s)][0])
-            ax[1, j].plot(d.t_h, d.BG, label=f"assorbimento x {s:g}")
+        voci = [(f"pasto alle {h}:00", cache[key("adult#001", 60, n, meal_h=h)][0], None)
+                for h in [10, 12, 14, 16]]
+        colonna(ax[:, j], voci, ub1, meal_h=[10, 12, 14, 16], legenda=(j == 0))
         ax[0, j].set_title(n)
-        for a in ax[:, j]:
-            a.axhspan(70, 180, color="green", alpha=0.12); a.grid(ls=":", alpha=0.5); a.legend(fontsize=8)
-    ax[0, 0].set_ylabel("BG [mg/dL] - orario"); ax[1, 0].set_ylabel("BG [mg/dL] - assorbimento")
-    for a in ax[1]:
-        a.set_xlabel("Ora del giorno [h]"); a.set_xlim(A.WARMUP_H, A.ANALYSIS_END_H)
-    plt.tight_layout(); plt.savefig("results/fig_sensibilita_pasto.png", dpi=200); plt.close()
+    etichette(ax)
+    fig.suptitle("Sensibilità all'istante del pasto (adult#001, 60 g)")
+    plt.tight_layout(); plt.savefig("results/fig_orario_pasto.png", dpi=200); plt.close()
+
+    # 4.5 sensibilità alla velocità di assorbimento (adult#001, 60 g)
+    fig, ax = plt.subplots(3, 2, figsize=(12, 9), sharex=True)
+    for j, n in enumerate(["PID", "PID+IOB+PLGS"]):
+        voci = [(f"assorbimento $\\times$ {s:g}", cache[key("adult#001", 60, n, assorb=s)][0], None)
+                for s in [0.5, 1.0, 2.0]]
+        colonna(ax[:, j], voci, ub1, legenda=(j == 0))
+        ax[0, j].set_title(n)
+    etichette(ax)
+    fig.suptitle("Sensibilità alla velocità di assorbimento del pasto (adult#001, 60 g)")
+    plt.tight_layout(); plt.savefig("results/fig_assorbimento.png", dpi=200); plt.close()
 
     print("\nFatto: tabelle e grafici in results/")
