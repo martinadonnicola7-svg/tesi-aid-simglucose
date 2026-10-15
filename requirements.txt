@@ -1,9 +1,7 @@
-# Dipendenze minime. I risultati salvati in results/ sono stati ottenuti con:
-# Python 3.12, simglucose 0.2.11, numpy 2.4, scipy 1.17, pandas 3.0, matplotlib 3.10.
-# Con versioni diverse (per esempio simglucose 0.2.1) rilancia run_campaign.py e usa i numeri del TUO computer.
-simglucose>=0.2.1
-numpy
-scipy
-pandas
-matplotlib
+# Versioni con cui sono stati ottenuti i risultati in results/ (Python 3.12).
+simglucose==0.2.11
+numpy==2.4.4
+scipy==1.17.1
+pandas==3.0.2
+matplotlib==3.10.8
 jupyter

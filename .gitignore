@@ -59,3 +59,8 @@ build/
 dist/
 *.egg-info/
 .eggs/
+
+# ==========================================
+# Cache delle simulazioni (rigenerata da run_campaign.py)
+# ==========================================
+results/_cache.pkl
