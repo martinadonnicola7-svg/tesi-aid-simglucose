@@ -5,3 +5,6 @@ scipy==1.17.1
 pandas==3.0.2
 matplotlib==3.10.8
 jupyter
+# Necessario con Python 3.12: gym (dipendenza di simglucose) usa distutils e simglucose usa pkg_resources,
+# che dalla 3.12 non sono più nella libreria standard e li fornisce setuptools (versioni precedenti alla 81).
+setuptools<81
