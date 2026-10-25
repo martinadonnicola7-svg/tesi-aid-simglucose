@@ -6,7 +6,7 @@ durata, passo, pasto, seme casuale e versioni delle librerie.
 import importlib.metadata as md
 import inspect
 import platform
-
+     
 import pandas as pd
 
 import aid_sim as A
