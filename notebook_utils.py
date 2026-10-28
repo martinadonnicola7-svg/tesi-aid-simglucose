@@ -8,15 +8,15 @@ import inspect
 import platform
      
 import pandas as pd
-
+ 
 import aid_sim as A
 from simglucose.actuator.pump import InsulinPump
 from simglucose.sensor.cgm import CGMSensor
 from simglucose.simulation.env import T1DSimEnv
 from simglucose.simulation.scenario import CustomScenario
 from simglucose.patient.t1dpatient import T1DPatient
-
-
+ 
+ 
 def library_versions():
     """Versioni dell'interprete e dei pacchetti usati."""
     rows = [{"Pacchetto": "Python", "Versione": platform.python_version()}]
@@ -26,8 +26,8 @@ def library_versions():
         except md.PackageNotFoundError:
             rows.append({"Pacchetto": n, "Versione": "non installato"})
     return pd.DataFrame(rows)
-
-
+ 
+ 
 # Unità di misura e significato dei parametri di AIDController
 _DOC = {
     "target":      ("mg/dL", "Glicemia obiettivo del regolatore"),
@@ -46,8 +46,8 @@ _DOC = {
     "plgs_pred":   ("mg/dL", "Soglia sulla glicemia proiettata per sospendere l'infusione"),
     "plgs_now":    ("mg/dL", "Soglia sulla misura corrente per sospendere l'infusione"),
 }
-
-
+ 
+ 
 def controller_table(ctrl_kwargs=None, basal_u_per_min=None):
     """Tabella dei parametri effettivi e dei vincoli del controllore, con unità di misura."""
     sig = inspect.signature(A.AIDController.__init__)
@@ -68,8 +68,8 @@ def controller_table(ctrl_kwargs=None, basal_u_per_min=None):
     rows.append({"Parametro": "u_min, u_max (attuatore)", "Valore": f"0.0 ; {A.U_MAX}", "Unita'": "U/min",
                  "Significato": f"Saturazione dell'infusione (0 <= u <= {A.U_MAX * 60:g} U/h)"})
     return pd.DataFrame(rows)
-
-
+ 
+ 
 def initial_conditions(patient_name, seed=1):
     """Parametri fisiologici e condizioni iniziali del paziente (all'inizio della simulazione, 00:00)."""
     p = T1DPatient.withName(patient_name)
@@ -87,12 +87,12 @@ def initial_conditions(patient_name, seed=1):
         eat_rate=float(T1DPatient.EAT_RATE),
         kabs=float(p._params["kabs"]),
     )
-
-
+ 
+ 
 def scenario_table(patient_name, cho, seed=1, meal_clock_h=A.MEAL_CLOCK_H):
     """Tabella del protocollo di simulazione."""
     ic = initial_conditions(patient_name, seed)
-    n_tot = int(A.ANALYSIS_END_H * 60 / ic["dt"])
+    n_tot = int((A.PRE_H + A.ANALYSIS_END_H) * 60 / ic["dt"])
     n_win = int((A.ANALYSIS_END_H - A.WARMUP_H) * 60 / ic["dt"])
     rows = [
         ("Paziente virtuale", patient_name, "-"),
@@ -102,13 +102,13 @@ def scenario_table(patient_name, cho, seed=1, meal_clock_h=A.MEAL_CLOCK_H):
         ("Sensore CGM", "Dexcom (rumore di simglucose)", "-"),
         ("Pompa di infusione", "Insulet", "-"),
         ("Seme casuale del sensore", seed, "-"),
-        ("Inizio simulazione", A.SIM_START.strftime("%H:%M"), "ora del giorno"),
-        ("Assestamento escluso dalle metriche", f"00:00-{int(A.WARMUP_H):02d}:00", "ora del giorno"),
+        ("Inizio simulazione", f"00:00 del giorno precedente ({A.PRE_H:g} h prima)", "ora del giorno"),
+        ("Assestamento escluso dalle metriche", f"giorno precedente + 00:00-{int(A.WARMUP_H):02d}:00 ({A.PRE_H + A.WARMUP_H:g} h)", "-"),
         ("Finestra di analisi", f"{int(A.WARMUP_H):02d}:00-{int(A.ANALYSIS_END_H):02d}:00", "ora del giorno"),
         ("Passo di campionamento dt", ic["dt"], "min"),
         ("Passi totali / nella finestra", f"{n_tot} / {n_win}", "-"),
-        ("Glicemia plasmatica iniziale (00:00)", round(ic["bg0"], 1), "mg/dL"),
-        ("Misura CGM iniziale (00:00)", round(ic["cgm0"], 1), "mg/dL"),
+        ("Glicemia plasmatica iniziale (inizio simulazione)", round(ic["bg0"], 1), "mg/dL"),
+        ("Misura CGM iniziale (inizio simulazione)", round(ic["cgm0"], 1), "mg/dL"),
         ("Stati iniziali stimatore IOB (S1, S2)", "0.0, 0.0", "U"),
         ("Orario del pasto", f"{int(meal_clock_h):02d}:{int(round(meal_clock_h % 1 * 60)):02d}", "ora del giorno"),
         ("Carico di carboidrati (CHO)", cho, "g"),
@@ -118,3 +118,4 @@ def scenario_table(patient_name, cho, seed=1, meal_clock_h=A.MEAL_CLOCK_H):
         ("Glicemia usata per le metriche", "plasmatica Gp/Vg del modello", "mg/dL"),
     ]
     return pd.DataFrame(rows, columns=["Voce", "Valore", "Unita'"])
+ 
