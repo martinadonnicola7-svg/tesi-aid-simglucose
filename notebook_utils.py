@@ -8,15 +8,15 @@ import inspect
 import platform
      
 import pandas as pd
- 
+
 import aid_sim as A
 from simglucose.actuator.pump import InsulinPump
 from simglucose.sensor.cgm import CGMSensor
 from simglucose.simulation.env import T1DSimEnv
 from simglucose.simulation.scenario import CustomScenario
 from simglucose.patient.t1dpatient import T1DPatient
- 
- 
+
+
 def library_versions():
     """Versioni dell'interprete e dei pacchetti usati."""
     rows = [{"Pacchetto": "Python", "Versione": platform.python_version()}]
@@ -26,8 +26,8 @@ def library_versions():
         except md.PackageNotFoundError:
             rows.append({"Pacchetto": n, "Versione": "non installato"})
     return pd.DataFrame(rows)
- 
- 
+
+
 # Unità di misura e significato dei parametri di AIDController
 _DOC = {
     "target":      ("mg/dL", "Glicemia obiettivo del regolatore"),
@@ -46,8 +46,8 @@ _DOC = {
     "plgs_pred":   ("mg/dL", "Soglia sulla glicemia proiettata per sospendere l'infusione"),
     "plgs_now":    ("mg/dL", "Soglia sulla misura corrente per sospendere l'infusione"),
 }
- 
- 
+
+
 def controller_table(ctrl_kwargs=None, basal_u_per_min=None):
     """Tabella dei parametri effettivi e dei vincoli del controllore, con unità di misura."""
     sig = inspect.signature(A.AIDController.__init__)
@@ -68,8 +68,8 @@ def controller_table(ctrl_kwargs=None, basal_u_per_min=None):
     rows.append({"Parametro": "u_min, u_max (attuatore)", "Valore": f"0.0 ; {A.U_MAX}", "Unita'": "U/min",
                  "Significato": f"Saturazione dell'infusione (0 <= u <= {A.U_MAX * 60:g} U/h)"})
     return pd.DataFrame(rows)
- 
- 
+
+
 def initial_conditions(patient_name, seed=1):
     """Parametri fisiologici e condizioni iniziali del paziente (all'inizio della simulazione, 00:00)."""
     p = T1DPatient.withName(patient_name)
@@ -87,8 +87,8 @@ def initial_conditions(patient_name, seed=1):
         eat_rate=float(T1DPatient.EAT_RATE),
         kabs=float(p._params["kabs"]),
     )
- 
- 
+
+
 def scenario_table(patient_name, cho, seed=1, meal_clock_h=A.MEAL_CLOCK_H):
     """Tabella del protocollo di simulazione."""
     ic = initial_conditions(patient_name, seed)
@@ -118,4 +118,3 @@ def scenario_table(patient_name, cho, seed=1, meal_clock_h=A.MEAL_CLOCK_H):
         ("Glicemia usata per le metriche", "plasmatica Gp/Vg del modello", "mg/dL"),
     ]
     return pd.DataFrame(rows, columns=["Voce", "Valore", "Unita'"])
- 
