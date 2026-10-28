@@ -1,10 +1,8 @@
-# Versioni con cui sono stati ottenuti i risultati in results/ (Python 3.12).
+# Versioni con cui sono stati ottenuti i risultati in results/ (Python 3.13).
 simglucose==0.2.11
 numpy==2.4.4
 scipy==1.17.1
 pandas==3.0.2
 matplotlib==3.10.8
-jupyter
-# Necessario con Python 3.12: gym (dipendenza di simglucose) usa distutils e simglucose usa pkg_resources,
-# che dalla 3.12 non sono più nella libreria standard e li fornisce setuptools (versioni precedenti alla 81).
-setuptools<81
+jupyter==1.1.1
+setuptools==80.10.2
