@@ -233,12 +233,51 @@ def simulate(patient_name, cho, ctrl_kwargs, seed=1, meal_clock_h=MEAL_CLOCK_H,
     return df, ub
 
 
-def metrics(df, signal="BG", meal_h=MEAL_CLOCK_H, t0=WARMUP_H):
-    """Metriche cliniche sulla finestra di analisi (t_h >= t0), più il TBR tardivo (da meal_h + 3 h)."""
+def tempo_rientro(df, meal_h=MEAL_CLOCK_H, signal="BG", lo=70.0, hi=180.0, t_end=ANALYSIS_END_H):
+    """Tempo di rientro nel range [h]: dal pasto al primo istante, dopo l'ultima uscita da [lo, hi] causata dal
+    pasto, in cui la glicemia torna nell'intervallo e non ne esce più fino a t_end.
+
+    0 se dopo il pasto la glicemia non esce mai dall'intervallo; NaN se a t_end è ancora fuori (non rientra).
+    """
+    w = df[(df.t_h >= meal_h) & (df.t_h <= t_end)]
+    fuori = ((w[signal] < lo) | (w[signal] > hi)).values
+    if not fuori.any():
+        return 0.0
+    if fuori[-1]:
+        return float("nan")
+    k = int(np.where(fuori)[0][-1]) + 1          # primo campione dentro dopo l'ultima uscita
+    return float(w.t_h.iloc[k] - meal_h)
+
+
+def commutazioni(df, t0=WARMUP_H):
+    """Indicatori della variabilità dell'infusione nella finestra di analisi.
+
+    n_commut: numero di cambi del vincolo attivo (attivazioni e disattivazioni di tetto IOB, PLGS, saturazioni);
+    n_sosp:   numero di sospensioni dell'infusione (passaggi da u > 0 a u = 0);
+    TV_u:     variazione totale dell'infusione sum|u_k - u_{k-1}| [U/h];
+    std_u:    deviazione standard dell'infusione [U/h].
+    """
+    w = df[df.t_h >= t0]
+    lim = w.Vincolo.values
+    u = w.Insulin_Uh.values
+    return {
+        "n_commut": int(np.sum(lim[1:] != lim[:-1])),
+        "n_sosp": int(np.sum((u[1:] == 0.0) & (u[:-1] > 0.0))),
+        "TV_u": float(np.abs(np.diff(u)).sum()),
+        "std_u": float(u.std()),
+    }
+
+
+def metrics(df, signal="BG", meal_h=MEAL_CLOCK_H, t0=WARMUP_H, target=120.0):
+    """Metriche cliniche sulla finestra di analisi (t_h >= t0), più il TBR tardivo (da meal_h + 3 h),
+    gli indici dell'errore (IAE), il tempo di rientro nel range e la variabilità dell'infusione."""
     w = df[df.t_h >= t0]
     g = w[signal].values
+    dt_h = float(df.t_h.iloc[1] - df.t_h.iloc[0])
     late = w[w.t_h >= meal_h + 3][signal].values
     post = w[(w.t_h >= meal_h) & (w.t_h < meal_h + 6)][signal].values
+    # distanza dall'intervallo 70-180 (0 dentro il range): errore "clinico" che non penalizza le oscillazioni in range
+    fuori = np.maximum(70.0 - g, 0.0) + np.maximum(g - 180.0, 0.0)
     return {
         "TIR": 100 * np.mean((g >= 70) & (g <= 180)),
         "TAR": 100 * np.mean(g > 180),
@@ -249,5 +288,10 @@ def metrics(df, signal="BG", meal_h=MEAL_CLOCK_H, t0=WARMUP_H):
         "TIR_post6h": 100 * np.mean((post >= 70) & (post <= 180)) if len(post) else 0.0,
         "picco": float(g.max()),
         "nadir": float(g.min()),
-        "insulina_tot": float(w.Insulin_Uh.sum() * (df.t_h.iloc[1] - df.t_h.iloc[0])),  # U nella finestra
+        "insulina_tot": float(w.Insulin_Uh.sum() * dt_h),                     # U nella finestra
+        "IAE": float(np.abs(g - target).sum() * dt_h),                        # mg/dL*h, rispetto al target
+        "IAE_post6h": float(np.abs(post - target).sum() * dt_h),              # mg/dL*h, 6 h dopo il pasto
+        "IAE_range": float(fuori.sum() * dt_h),                               # mg/dL*h, fuori da 70-180
+        "t_rientro": tempo_rientro(df, meal_h, signal),                       # h dal pasto
+        **commutazioni(df, t0),
     }
