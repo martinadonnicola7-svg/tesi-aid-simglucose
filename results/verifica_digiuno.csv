@@ -1,0 +1,31 @@
+Paziente,Controllore,Ampiezza ultimo giorno [mg/dL],Media ultimo giorno [mg/dL],Min dalle 08 [mg/dL],Max dalle 08 [mg/dL],TBR dalle 08 [%],Superata
+adult#001,PID,0.2,120.0,119.2,120.2,0.0,True
+adult#002,PID,0.2,119.9,119.6,120.0,0.0,True
+adult#003,PID,0.1,120.0,120.0,120.6,0.0,True
+adult#004,PID,0.0,120.0,120.0,120.0,0.0,True
+adult#005,PID,0.7,120.4,120.2,122.4,0.0,True
+adult#006,PID,0.0,120.0,119.9,120.2,0.0,True
+adult#007,PID,0.0,120.0,120.0,120.0,0.0,True
+adult#008,PID,0.0,120.0,120.0,120.1,0.0,True
+adult#009,PID,0.0,120.0,119.5,120.0,0.0,True
+adult#010,PID,0.5,120.3,120.1,121.9,0.0,True
+adult#001,PID (Ki precedente 5e-6),64.9,109.6,80.8,145.7,0.0,False
+adult#002,PID (Ki precedente 5e-6),36.8,115.7,99.3,136.3,0.0,False
+adult#003,PID (Ki precedente 5e-6),101.5,112.8,64.2,165.7,15.0,False
+adult#004,PID (Ki precedente 5e-6),103.8,117.4,64.1,167.9,17.1,False
+adult#005,PID (Ki precedente 5e-6),49.5,122.8,94.6,144.2,0.0,False
+adult#006,PID (Ki precedente 5e-6),129.2,93.2,41.9,171.2,37.1,False
+adult#007,PID (Ki precedente 5e-6),146.9,100.3,41.9,188.8,38.6,False
+adult#008,PID (Ki precedente 5e-6),64.5,117.7,81.5,146.0,0.0,False
+adult#009,PID (Ki precedente 5e-6),54.1,112.5,89.6,143.6,0.0,False
+adult#010,PID (Ki precedente 5e-6),50.1,120.2,98.5,148.5,0.0,False
+adult#001,PID+IOB+PLGS,0.2,120.0,119.2,120.2,0.0,True
+adult#002,PID+IOB+PLGS,0.2,119.9,119.6,120.0,0.0,True
+adult#003,PID+IOB+PLGS,0.1,120.0,120.0,120.6,0.0,True
+adult#004,PID+IOB+PLGS,0.0,120.0,120.0,120.0,0.0,True
+adult#005,PID+IOB+PLGS,0.7,120.4,120.2,122.4,0.0,True
+adult#006,PID+IOB+PLGS,0.0,120.0,119.9,120.2,0.0,True
+adult#007,PID+IOB+PLGS,0.0,120.0,120.0,120.0,0.0,True
+adult#008,PID+IOB+PLGS,0.0,120.0,120.0,120.1,0.0,True
+adult#009,PID+IOB+PLGS,0.0,120.0,119.5,120.0,0.0,True
+adult#010,PID+IOB+PLGS,0.5,120.3,120.1,121.9,0.0,True
