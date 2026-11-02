@@ -13,8 +13,10 @@ Il repository contiene la simulazione *in silico* di algoritmi di regolazione gl
 
 - **Pazienti virtuali**: `adult#001` (riferimento), `adult#002` e `adult#003`; per l'estensione alla popolazione tutti i
   10 adulti di simglucose (`adult#001`-`adult#010`).
-- **Sensore CGM**: Dexcom, campionamento ogni 3 minuti, con il rumore di simglucose (seme `SEED = 1`; 10 semi per la
-  robustezza su `adult#001`-`adult#003`).
+- **Sensore CGM**: Dexcom, campionamento ogni 3 minuti, con il rumore di simglucose (seme `SEED = 1`).
+- **Popolazione e robustezza** (due analisi distinte): l'analisi di popolazione comprende **10 pazienti con un solo
+  seme** (`SEED = 1`, digiuno, 60 e 90 g) e misura la variabilità tra pazienti; la prova di robustezza al rumore comprende
+  **3 pazienti (`adult#001`-`adult#003`) con 10 semi**, solo pasto da 60 g, e misura la variabilità dovuta al rumore del CGM.
 - **Pompa**: Insulet, con saturazione imposta dal controllore `0 <= u <= 0.25 U/min` (15 U/h).
 - **Assestamento**: la simulazione parte alle 00:00 del **giorno precedente** con il controllore già attivo. Il giorno
   precedente e le ore 00:00-08:00 del giorno di analisi (32 ore in tutto) servono a portare l'anello all'equilibrio sul
@@ -44,15 +46,23 @@ Il prezzo di un integrale più lento è un assestamento iniziale più lungo, per
 
 | Nome | Descrizione |
 |---|---|
-| `PID senza AW` | PID della prima versione (`Ki = 5e-6`): integrale limitato in [-2000, 10000], un intervallo così largo che il limite non interviene mai. Serve solo a mostrare il **windup** dell'integratore. |
+| `PID senza AW` | Stessi `Kp`, `Ki`, `Kd` del `PID`; cambia solo la gestione dell'integratore, senza limiti e senza integrazione condizionata. Isola l'effetto del **windup**: con i guadagni ritarati i risultati coincidono con quelli del `PID` negli scenari simulati, perché l'integrale resta sotto il limite (al massimo circa il 60 %) e l'uscita non satura mai. Il PID con il vecchio `Ki = 5e-6` compare solo nella verifica a digiuno, come confronto tra le due tarature. |
 | `PID` | PID di riferimento con anti-windup: limiti dell'integrale legati al basale (`Ki·I_max = u_b`, `Ki·I_min = -0.25 u_b`) e integrazione condizionata quando l'uscita è limitata. |
 | `PID cons.` | Come `PID`, ma con azione integrale massima dimezzata (`Ki·I_max = 0.5 u_b`): la sicurezza si ottiene riducendo l'aggressività. |
 | `PID+PLGS` | `PID` + sospensione predittiva: `u = 0` se la glicemia proiettata a 20 min scende sotto 90 mg/dL o la misura è sotto 75 mg/dL. |
-| `PID+IOB` | `PID` + tetto sull'insulina attiva stimata: se l'IOB netto supera 0.75 volte il basale orario, l'infusione torna al basale. Il tetto è stato riportato da 1.5 a 0.75 dopo la nuova taratura: il PID più lento accumula meno insulina e con 1.5 il vincolo non interveniva quasi mai. |
+| `PID+IOB` | `PID` + tetto sull'insulina attiva stimata: se l'IOB netto supera 0.75 volte il basale orario, l'infusione torna al basale. La configurazione nominale (`iob_alpha = 0.75`, `tau_s = 50` min) è scelta con il criterio descritto sotto. |
 | `PID+IOB+PLGS` | **Controllore proposto**: `PID` con tetto IOB e PLGS attivi insieme. |
 
 Tra `PID` e il controllore proposto le condizioni sono identiche (stesso paziente, sensore, seme, condizioni iniziali,
 assestamento, pasto, guadagni e limiti dell'attuatore): cambia solo l'attivazione del tetto IOB e del PLGS.
+
+**Scelta della configurazione nominale del tetto IOB.** Griglia `iob_alpha` ∈ {0.75, 1, 1.25, 1.5} × `tau_s` ∈ {30, 50} min
+sul controllore proposto, 10 adulti × pasti da 60 e 90 g (20 casi per combinazione). Criterio, in ordine: (1) sicurezza,
+cioè in *ogni* caso TBR < 4 % e TBR<54 < 1 % (obiettivi del consenso internazionale, Battelino et al., *Diabetes Care*
+2019); (2) tra le combinazioni ammissibili, IAE fuori range medio minimo; (3) a parità entro l'1 %, meno commutazioni.
+Valori di `iob_alpha` più alti o `tau_s = 30` min riducono commutazioni e IAE fuori range, ma con 90 g fanno ricomparire
+ipoglicemie oltre il 4 % in alcuni pazienti: l'unica combinazione ammissibile è `iob_alpha = 0.75`, `tau_s = 50` min.
+Tabella in `results/scelta_iob.csv`, grafico in `results/fig_scelta_iob.png`, dettaglio nel notebook 05.
 
 L'**IOB stimato** dal controllore è l'insulina in eccesso rispetto al basale filtrata da due compartimenti in serie con
 τ = 50 min. Per confronto si salva anche l'**IOB netto del modello** (compartimenti sottocutanei `Isc1 + Isc2` meno il
@@ -121,8 +131,8 @@ pasto, seme casuale). Le versioni usate per i risultati salvati sono fissate in 
 | `02_confronto_carichi.ipynb` | Confronto sui carichi da 30, 60 e 90 g con paziente fisso (`adult#001`), tabella delle condizioni identiche e contributo dei singoli moduli (IOB, PLGS). |
 | `03_altri_pazienti.ipynb` | Stesso confronto su `adult#001`, `adult#002`, `adult#003` (digiuno, 60 g, 90 g), senza ritarare i parametri. |
 | `04_orario_assorbimento.ipynb` | Sensibilità all'orario del pasto e alla velocità di assorbimento (`adult#001`, 60 g). |
-| `05_commutazioni_sensibilita_iob_plgs.ipynb` | IAE, tempo di rientro, commutazioni dell'infusione per modulo (`adult#001`, `adult#003`, 60 e 90 g) e sensibilità ai parametri del tetto IOB e del PLGS. |
-| `06_popolazione_semi.ipynb` | Estensione ai 10 adulti virtuali (digiuno, 60 g, 90 g, moduli separati e insieme), compromesso paziente per paziente tra ipoglicemia e iperglicemia, robustezza su 10 semi. |
+| `05_commutazioni_sensibilita_iob_plgs.ipynb` | IAE, tempo di rientro, commutazioni dell'infusione per modulo (`adult#001`, `adult#003`, 60 e 90 g), sensibilità ai parametri del tetto IOB e del PLGS e scelta motivata della configurazione nominale del tetto IOB sui 10 adulti. |
+| `06_popolazione_semi.ipynb` | Popolazione: 10 adulti virtuali con un seme (digiuno, 60 g, 90 g, moduli separati e insieme) e compromesso paziente per paziente tra ipoglicemia e iperglicemia. Robustezza: 3 pazienti × 10 semi, pasto da 60 g. |
 
 ## Struttura del repository
 
@@ -135,16 +145,17 @@ run_campaign.py                  tutte le simulazioni, tabelle e grafici
 03_altri_pazienti.ipynb          estensione agli altri pazienti virtuali
 04_orario_assorbimento.ipynb     sensibilità all'orario e alla velocità del pasto
 05_commutazioni_sensibilita_iob_plgs.ipynb   indici aggiunti, commutazioni, sensibilità tetto IOB / PLGS
-06_popolazione_semi.ipynb        10 adulti virtuali e 10 semi del rumore
+06_popolazione_semi.ipynb        10 adulti × 1 seme; 3 adulti × 10 semi (60 g)
 results/verifica_digiuno.csv     verifica nominale a digiuno, 10 adulti, taratura attuale e precedente
 results/metriche.csv             campagna principale (adult#001-#003)
-results/popolazione.csv          10 adulti, digiuno / 60 g / 90 g, tutti i moduli
+results/popolazione.csv          10 adulti × 1 seme, digiuno / 60 g / 90 g, tutti i moduli
 results/popolazione_sintesi.csv  media ± deviazione standard sui 10 adulti
-results/robustezza_semi.csv      media ± deviazione standard su 10 semi del rumore del sensore
+results/robustezza_semi.csv      3 adulti × 10 semi del rumore del sensore, 60 g (media ± dev. std)
 results/sensibilita_pasto.csv    orario del pasto e velocità di assorbimento
 results/sensibilita_iob_plgs.csv parametri del tetto IOB e del PLGS
+results/scelta_iob.csv           scelta della configurazione nominale del tetto IOB (10 adulti)
 results/fig_*.png                grafici (verifica a digiuno, 3 pannelli, carichi, pazienti, orario, assorbimento, commutazioni,
-                                 sensibilità IOB/PLGS, popolazione, compromesso)
+                                 sensibilità IOB/PLGS, scelta IOB, popolazione, compromesso)
 requirements.txt                 dipendenze con le versioni usate
 LICENSE
 ```
