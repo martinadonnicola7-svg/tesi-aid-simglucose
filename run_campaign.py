@@ -50,6 +50,16 @@ SENS = {
 }
 SENS_PAZ = ["adult#001", "adult#003"]
 SENS_CHO = [60, 90]
+# Scelta della configurazione nominale del tetto IOB: griglia iob_alpha x tau_s sui 10 adulti, 60 e 90 g.
+# Criterio esplicito, in ordine:
+#   1. sicurezza: in OGNI paziente e pasto TBR (<70 mg/dL) < 4 % e TBR<54 < 1 % (obiettivi del consenso
+#      internazionale sul tempo nell'intervallo, Battelino et al., Diabetes Care 2019);
+#   2. tra le configurazioni ammissibili, IAE fuori range medio minimo;
+#   3. a parità (entro l'1 %), numero medio di commutazioni minimo.
+SCELTA_ALPHA = [0.75, 1.0, 1.25, 1.5]
+SCELTA_TAU = [30.0, 50.0]
+TBR_MAX_CASO = 4.0
+TBR54_MAX_CASO = 1.0
 NOMINALE = {k: v.default for k, v in inspect.signature(A.AIDController.__init__).parameters.items()}
 
 # --- cache (si invalida se cambiano CFG, aid_sim.py o simglucose) ------------------------------
@@ -133,6 +143,40 @@ def media_std(T, gruppi, colonne):
     return pd.DataFrame(out)
 
 
+def chiavi_scelta():
+    """Simulazioni della griglia iob_alpha x tau_s (controllore proposto, 10 adulti, 60 e 90 g)."""
+    return [key(p, c, "PID+IOB+PLGS", iob_alpha=a, tau_s=t) for a in SCELTA_ALPHA for t in SCELTA_TAU
+            for p in POPOLAZIONE for c in [60, 90]]
+
+
+def tabella_scelta():
+    """Tabella della griglia con il criterio di scelta applicato. Restituisce (tabella, riga scelta o None)."""
+    Sc = pd.DataFrame([{"iob_alpha": dict(k[6])["iob_alpha"], "tau_s [min]": dict(k[6])["tau_s"], **row(k)}
+                       for k in chiavi_scelta()])
+    gr = Sc.groupby(["iob_alpha", "tau_s [min]"])
+    T = pd.DataFrame({
+        "TBR medio [%]": gr["TBR [%]"].mean(),
+        "TBR max per caso [%]": gr["TBR [%]"].max(),
+        "TBR<54 max per caso [%]": gr["TBR<54 [%]"].max(),
+        "Casi con TBR >= 4 % [n]": gr["TBR [%]"].agg(lambda x: int((x >= TBR_MAX_CASO).sum())),
+        "TAR medio [%]": gr["TAR [%]"].mean(),
+        "TIR medio [%]": gr["TIR [%]"].mean(),
+        "IAE fuori range medio [mg/dL*h]": gr["IAE fuori range [mg/dL*h]"].mean(),
+        "Commutazioni medie [-]": gr["Commutazioni vincolo [-]"].mean(),
+    }).reset_index()
+    T["Ammissibile"] = (T["TBR max per caso [%]"] < TBR_MAX_CASO) & (T["TBR<54 max per caso [%]"] < TBR54_MAX_CASO)
+    T["Scelta"] = False
+    amm = T[T.Ammissibile]
+    scelta_k = None
+    if len(amm):
+        best = amm["IAE fuori range medio [mg/dL*h]"].min()
+        vicine = amm[amm["IAE fuori range medio [mg/dL*h]"] <= 1.01 * best]
+        idx = vicine.sort_values("Commutazioni medie [-]").index[0]
+        T.loc[idx, "Scelta"] = True
+        scelta_k = T.loc[idx]
+    return T.round(2), scelta_k
+
+
 def pulisci_results():
     """Elimina tabelle e grafici precedenti: in results/ restano solo i file prodotti da questa esecuzione."""
     for f in glob.glob("results/*.png") + glob.glob("results/*.csv"):
@@ -150,7 +194,8 @@ if __name__ == "__main__":
     sens = [key(p, c, "PID+IOB+PLGS", **{par: v}) for par, vals in SENS.items() for v in vals
             for p in SENS_PAZ for c in SENS_CHO]
     sens += [key(p, c, "PID") for p in SENS_PAZ for c in SENS_CHO]      # riferimento senza vincoli
-    run_all(main + pop + semi + orari + assorb + sens)
+    scelta = chiavi_scelta()
+    run_all(main + pop + semi + orari + assorb + sens + scelta)
 
     with Pool() as pool:
         dig = dict(pool.map(_digiuno, [(p, n) for p in POPOLAZIONE for n in DIGIUNO]))
@@ -209,6 +254,16 @@ if __name__ == "__main__":
     Sens = pd.DataFrame(srow).round(2)
     Sens.to_csv("results/sensibilita_iob_plgs.csv", index=False)
     print("\n", Sens.to_string(index=False))
+
+    # --- 5b. scelta della configurazione nominale del tetto IOB -------------------------------
+    Scelta, scelta_k = tabella_scelta()
+    Scelta.to_csv("results/scelta_iob.csv", index=False)
+    print("\n", Scelta.to_string(index=False))
+    if scelta_k is not None:
+        print(f"Configurazione scelta: iob_alpha = {scelta_k.iob_alpha:g}, tau_s = {scelta_k['tau_s [min]']:g} min "
+              f"(nominale in aid_sim: iob_alpha = {NOMINALE['iob_alpha']:g}, tau_s = {NOMINALE['tau_s']:g} min)")
+        if (scelta_k.iob_alpha, scelta_k["tau_s [min]"]) != (NOMINALE["iob_alpha"], NOMINALE["tau_s"]):
+            print("ATTENZIONE: la configurazione scelta non coincide con quella nominale di aid_sim.py")
 
     # --- 6. grafici ----------------------------------------------------------------------------
     # Per ogni scenario si riportano glicemia, insulina somministrata e IOB (tre pannelli in colonna).
@@ -375,6 +430,28 @@ if __name__ == "__main__":
     fig.suptitle("Sensibilità del controllore PID+IOB+PLGS ai parametri del tetto IOB e del PLGS\n"
                  "(linea verticale: valore nominale; linee orizzontali sottili: PID senza vincoli)")
     plt.tight_layout(); plt.savefig("results/fig_sensibilita_iob_plgs.png", dpi=200); plt.close()
+
+    # 6.7b scelta della configurazione nominale del tetto IOB
+    fig, ax = plt.subplots(1, 2, figsize=(14, 5))
+    for _, r in Scelta.iterrows():
+        lab = f"α={r.iob_alpha:g}, τ={r['tau_s [min]']:g}"
+        col = "tab:green" if r.Ammissibile else "tab:red"
+        mk = "*" if r.Scelta else "o"
+        ax[0].scatter(r["IAE fuori range medio [mg/dL*h]"], r["Commutazioni medie [-]"], color=col, marker=mk,
+                      s=250 if r.Scelta else 60)
+        ax[0].annotate(lab, (r["IAE fuori range medio [mg/dL*h]"], r["Commutazioni medie [-]"]), fontsize=8,
+                       xytext=(4, 4), textcoords="offset points")
+    ax[0].set_xlabel("IAE fuori range medio [mg/dL·h]"); ax[0].set_ylabel("Commutazioni medie [-]")
+    ax[0].set_title("Verde: ammissibile (TBR < 4 % e TBR<54 < 1 % in ogni caso); stella: scelta", fontsize=9)
+    ax[0].grid(ls=":", alpha=0.5)
+    etich = [f"α={a:g}\nτ={t:g}" for a, t in zip(Scelta.iob_alpha, Scelta["tau_s [min]"])]
+    ax[1].bar(range(len(Scelta)), Scelta["TBR max per caso [%]"],
+              color=["tab:green" if a else "tab:red" for a in Scelta.Ammissibile])
+    ax[1].axhline(TBR_MAX_CASO, color="k", ls="--", lw=1, label="soglia 4 %")
+    ax[1].set_xticks(range(len(Scelta))); ax[1].set_xticklabels(etich, fontsize=8)
+    ax[1].set_ylabel("TBR massimo tra i 20 casi [%]"); ax[1].legend(); ax[1].grid(ls=":", alpha=0.5, axis="y")
+    fig.suptitle("Scelta della configurazione nominale del tetto IOB (10 adulti, pasti da 60 e 90 g, PID+IOB+PLGS)")
+    plt.tight_layout(); plt.savefig("results/fig_scelta_iob.png", dpi=200); plt.close()
 
     # 6.8 popolazione: distribuzione delle metriche sui 10 adulti per ciascun controllore
     MET = ["TIR [%]", "TBR [%]", "Picco [mg/dL]", "IAE fuori range [mg/dL*h]", "Commutazioni vincolo [-]"]
