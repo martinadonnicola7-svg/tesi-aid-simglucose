@@ -49,12 +49,12 @@ START = DAY0 + timedelta(hours=WARMUP_H)
 class AIDController(Controller):
     """PID a tempo discreto (uscita in U/min) con anti-windup, vincolo IOB e sospensione predittiva (PLGS).
 
-    Anti-windup (sempre attivo):
+    Anti-windup (attivo salvo nella configurazione "PID senza AW"):
       * limiti dell'integrale legati al basale del paziente:
             Ki * I_max =  aw_frac     * u_b   (l'azione integrale aggiunge al massimo aw_frac volte il basale)
             Ki * I_min = -aw_frac_low * u_b   (l'azione integrale toglie al massimo aw_frac_low volte il basale)
-        Se i_min / i_max vengono passati esplicitamente, si usano quei valori (per esempio il clamp largo
-        [-2000, 10000] della versione precedente, che non interviene mai e mostra il windup).
+        Se i_min / i_max vengono passati esplicitamente, si usano quei valori (per esempio -inf, +inf nella
+        configurazione "PID senza AW", in cui l'integrale non è limitato e mostra il windup).
       * integrazione condizionata (se freeze=True): l'integrale non viene aggiornato quando l'uscita è
         limitata (saturazione dell'attuatore, tetto IOB o PLGS) e l'errore spingerebbe ancora nella
         direzione del limite.
@@ -169,7 +169,7 @@ class AIDController(Controller):
 
 # Configurazioni dei controllori usate in run_campaign.py e nei notebook (argomenti di AIDController)
 CFG = {
-    "PID senza AW": dict(ki=5e-6, i_min=-2000.0, i_max=10000.0, freeze=False),  # prima versione: Ki originale, windup
+    "PID senza AW": dict(i_min=-np.inf, i_max=np.inf, freeze=False),  # stessi Kp, Ki, Kd del PID, integratore libero
     "PID":          dict(),                                            # PID di riferimento con anti-windup
     "PID cons.":    dict(aw_frac=0.5),                                 # sicurezza ottenuta riducendo l'azione integrale
     "PID+PLGS":     dict(use_plgs=True),                               # PID + sospensione predittiva
